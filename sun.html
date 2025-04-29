@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TB Causes and Treatment Availability Sunburst Chart</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f4f4f4;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #sunburst {
+      width: 800px;
+      height: 800px;
+    }
+    .sunburst-tooltip {
+      position: absolute;
+      background-color: #fff;
+      border: 1px solid #ddd;
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+      pointer-events: none;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+    .filter-container {
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+<h1>Tuberculosis Causes and Treatment Availability</h1>
+
+<div class="filter-container">
+  <label for="countryFilter">Select Country:</label>
+  <select id="countryFilter">
+    <option value="">All Countries</option>
+    <!-- Options will be populated dynamically -->
+  </select>
+</div>
+
+<div id="sunburst"></div>
+<div id="tooltip" class="sunburst-tooltip" style="display:none;"></div>
+
+<script>
+let allData = []; // Store all data globally
+
+function createSunburstChart(data) {
+  // Clear any existing chart
+  d3.select("#sunburst").html("");
+
+  // Set up the SVG canvas dimensions
+  const width = 600;
+  const height = 600;
+  const radius = Math.min(width, height) / 2;
+
+  // Prepare hierarchical data
+  const root = {
+    name: "TB Data",
+    children: []
+  };
+
+  // Group data by TB Cause and Treatment Availability
+  const causeMap = new Map();
+
+  data.forEach(d => {
+    const tbCause = d["TB Cause"];
+    const treatmentAvailable = d["Treatment Available"];
+    const peopleAffected = +d["People Affected"] || 0;
+    const country = d["Country"];
+    const key = `${tbCause}-${treatmentAvailable}`;
+
+    if (!causeMap.has(key)) {
+      causeMap.set(key, {
+        tbCause,
+        treatmentAvailable,
+        peopleAffected: 0,
+        country
+      });
+    }
+
+    const existingEntry = causeMap.get(key);
+    existingEntry.peopleAffected += peopleAffected;
+  });
+
+  // Convert map to hierarchical structure
+  const causesGroup = {};
+  
+  causeMap.forEach((value) => {
+    if (!causesGroup[value.tbCause]) {
+      causesGroup[value.tbCause] = {
+        name: value.tbCause,
+        children: []
+      };
+      root.children.push(causesGroup[value.tbCause]);
+    }
+
+    causesGroup[value.tbCause].children.push({
+      name: value.treatmentAvailable === "Yes" ? "Treatment Available" 
+           : value.treatmentAvailable === "No" ? "No Treatment" 
+           : "Treatment Limited",
+      size: value.peopleAffected
+    });
+  });
+
+  // Create SVG
+  const svg = d3.select("#sunburst")
+    .append("svg")
+    .attr("width", width)
+    .attr("height", height)
+    .append("g")
+    .attr("transform", `translate(${width / 2}, ${height / 2})`);
+
+  // Create a zoom behavior
+  const zoom = d3.zoom()
+    .scaleExtent([0.5, 2])
+    .on("zoom", (event) => {
+      svg.attr("transform", event.transform);
+    });
+
+  svg.call(zoom);
+
+  // Custom color function
+  function getColor(node, depth) {
+    // Define a distinct color palette for depth 1
+    const depth1Colors = [
+      "#1f77b4",  // Blue
+      "#ff7f0e",  // Orange
+      "#2ca02c",  // Green
+      "#d62728",  // Red
+      //"#9467bd",  // Purple
+      "#8c564b",  // Brown
+      //"#e377c2",  // Pink
+      "#7f7f7f",  // Gray
+      "#bcbd22",  // Olive
+      "#17becf"   // Cyan
+    ];
+
+    // Root layer (depth 0): White
+    if (depth === 0) return "#ffffff";
+    
+    // Depth 1: Use distinct colors
+    if (depth === 1) {
+      // Use a consistent color based on the node's name
+      const colorIndex = Math.abs(node.data.name.split('').reduce((a,b) => a + b.charCodeAt(0), 0)) % depth1Colors.length;
+      return depth1Colors[colorIndex];
+    }
+    
+    // Depth 2: Inherit color from parent (depth 1)
+    if (depth === 2) {
+      // Find the parent's color
+      let parentColor = getColor(node.parent, 1);
+      
+      // Create a slightly lighter version of the parent color
+      const color = d3.color(parentColor);
+      color.opacity = 0.6;
+      return color.toString();
+    }
+    
+    // Fallback color
+    return "#cccccc";
+  }
+
+  // Partition layout
+  const partition = d3.partition()
+    .size([2 * Math.PI, radius]);
+
+  // Prepare hierarchy
+  const hierarchyRoot = d3.hierarchy(root)
+    .sum(d => d.size || 0)
+    .sort((a, b) => (b.value || 0) - (a.value || 0));
+
+  partition(hierarchyRoot);
+
+  // Arc generator
+  const arc = d3.arc()
+    .startAngle(d => d.x0)
+    .endAngle(d => d.x1)
+    .innerRadius(d => Math.max(0, d.y0))
+    .outerRadius(d => d.y1);
+
+  // Add paths
+  svg.selectAll("path")
+    .data(hierarchyRoot.descendants())
+    .enter().append("path")
+    .attr("d", arc)
+    .style("fill", d => getColor(d, d.depth))
+    .style("stroke", "#fff")
+    .style("stroke-width", 1)
+    .style("cursor", "pointer")
+    .on("mouseover", function(event, d) {
+      d3.select(this).style("opacity", 0.7);
+      showTooltip(event, d);
+    })
+    .on("mouseout", function() {
+      d3.select(this).style("opacity", 1);
+      hideTooltip();
+    });
+
+  // Add labels
+  svg.selectAll("text")
+    .data(hierarchyRoot.descendants().filter(d => d.depth > 0 && (d.y1 - d.y0) > 0.1))
+    .enter().append("text")
+    .attr("transform", function(d) {
+      const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+      const y = (d.y0 + d.y1) / 2;
+      return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
+    })
+    .attr("dy", "0.35em")
+    .style("text-anchor", "middle")
+    .style("font-size", "10px")
+    .style("fill", "black")
+    .text(d => d.data.name);
+
+  // Tooltip functions
+  function showTooltip(event, d) {
+    const tooltip = d3.select("#tooltip");
+    tooltip.style("display", "block")
+      .style("left", `${event.pageX + 10}px`)
+      .style("top", `${event.pageY + 10}px`)
+      .html(`
+        <strong>Category:</strong> ${d.data.name}<br>
+        <strong>People Affected:</strong> ${d.value ? d.value.toLocaleString() : 'N/A'}
+      `);
+  }
+
+  function hideTooltip() {
+    d3.select("#tooltip").style("display", "none");
+  }
+}
+
+// Load the CSV file and populate the country filter
+d3.csv("updated_tb_dataset.csv").then(function(data) {
+  allData = data; // Store all data for filtering purposes
+
+  createCountryFilter(data); // Create filter options based on loaded data
+  createSunburstChart(data); // Initial chart creation with all data
+}).catch(function(error) {
+  console.error("Error loading the CSV file:", error);
+});
+
+// Function to create country filter options dynamically
+function createCountryFilter(data) {
+  const countries = Array.from(new Set(data.map(d => d["country"]))); // Extract unique countries
+
+  const countryFilter = d3.select("#countryFilter");
+  countries.forEach(country => {
+    countryFilter.append("option").text(country).attr("value", country);
+  });
+
+  countryFilter.on("change", function() {
+    const selectedCountry = this.value;
+
+    // Filter data based on selected country and redraw the chart
+    const filteredData = selectedCountry ? 
+        allData.filter(d => d["country"] === selectedCountry) : 
+        allData;
+
+    createSunburstChart(filteredData); // Update chart with filtered data
+  });
+}
+</script>
+</body>
+</html>

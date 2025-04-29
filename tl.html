@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timeline Visualization with Animation</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        .tooltip {
+            position: absolute;
+            background-color: #fff;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            pointer-events: none;
+            font-size: 14px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .axis path, .axis line {
+            fill: none;
+            stroke: #000;
+            shape-rendering: crispEdges;
+        }
+        .grid line {
+            stroke: #ddd;
+        }
+        .grid path {
+            stroke-width: 0;
+        }
+        .controls {
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        .slider {
+            width: 300px;
+        }
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider-toggle {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .slider-toggle:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider-toggle {
+            background-color: #2196F3;
+        }
+        input:checked + .slider-toggle:before {
+            transform: translateX(26px);
+        }
+        .toggle-label {
+            margin-left: 70px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Timeline Visualization</h2>
+    <div class="controls">
+        <div>
+            <label for="country-select">Select Country:</label>
+            <select id="country-select"></select>
+        </div>
+        <div>
+            <label class="switch">
+                <input type="checkbox" id="metric-toggle">
+                <span class="slider-toggle"></span>
+            </label>
+            <span class="toggle-label">People Affected / Deaths</span>
+        </div>
+    </div>
+    <div id="timeline"></div>
+    <div class="controls">
+        <button id="play-button">Play</button>
+        <input id="year-slider" class="slider" type="range">
+    </div>
+    <script>
+        // Dimensions for the SVG canvas
+        const margin = { top: 20, right: 30, bottom: 50, left: 80 };
+        const width = 960 - margin.left - margin.right;
+        const height = 500 - margin.top - margin.bottom;
+
+        // Append SVG to the timeline div
+        const svg = d3.select('#timeline')
+            .append('svg')
+            .attr('width', width + margin.left + margin.right)
+            .attr('height', height + margin.top + margin.bottom)
+            .append('g')
+            .attr('transform', `translate(${margin.left},${margin.top})`);
+
+        // Add a tooltip
+        const tooltip = d3.select('body')
+            .append('div')
+            .attr('class', 'tooltip')
+            .style('opacity', 0);
+
+        // Initialize variables for animation control
+        let playing = false;
+        let currentYear = null;
+        let interval;
+
+        // Load the dataset
+        d3.csv('updated_tb_dataset.csv').then(data => {
+            // Ensure numerical conversion for both metrics
+            data.forEach(d => {
+                d.year = +d.year;
+                d['People Affected'] = +d['People Affected'];
+                d['Deaths'] = +d['Deaths'];
+            });
+
+            // Get unique countries for the dropdown
+            const countries = [...new Set(data.map(d => d.country))];
+
+            // Populate the country select dropdown and add "All" option
+            const countrySelect = d3.select('#country-select');
+            countrySelect.append('option').text('All').attr('value', 'All');
+            countrySelect.selectAll('option.other')
+                .data(countries)
+                .enter()
+                .append('option')
+                .attr('class', 'other')
+                .text(d => d)
+                .attr('value', d => d);
+
+            // Metric toggle
+            const metricToggle = d3.select('#metric-toggle');
+            let currentMetric = 'People Affected';
+
+            // Update metric when toggle is changed
+            metricToggle.on('change', function() {
+                currentMetric = this.checked ? 'Deaths' : 'People Affected';
+                updateYAxis();
+                update(currentYear);
+            });
+
+            // Function to update y-axis based on current metric
+            function updateYAxis() {
+                // Determine max value for current metric
+                const maxValue = d3.max(data, d => d[currentMetric]);
+
+                // Update y scale
+                y.domain([0, maxValue]).nice();
+
+                // Transition y-axis
+                svg.select('.y-axis')
+                    .transition()
+                    .duration(500)
+                    .call(d3.axisLeft(y));
+
+                // Update y-axis label
+                svg.select('.y-axis-label')
+                    .text(currentMetric);
+            }
+
+            // Set up scales
+            const x = d3.scaleLinear()
+                .domain(d3.extent(data, d => d.year))
+                .range([0, width]);
+
+            const y = d3.scaleLinear()
+                .domain([0, d3.max(data, d => d['People Affected'])])
+                .nice()
+                .range([height, 0]);
+
+            // Add x-axis
+            svg.append('g')
+                .attr('transform', `translate(0,${height})`)
+                .call(d3.axisBottom(x).tickFormat(d3.format('d')));
+
+            // Add y-axis with class for later selection
+            svg.append('g')
+                .attr('class', 'y-axis')
+                .call(d3.axisLeft(y));
+
+            // Color scale for countries
+            const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
+
+            // Add x-axis label
+            svg.append('text')
+                .attr('transform', `translate(${width / 2},${height + margin.bottom - 10})`)
+                .style('text-anchor', 'middle')
+                .text('Year');
+
+            // Add y-axis label with class for later selection
+            svg.append('text')
+                .attr('class', 'y-axis-label')
+                .attr('transform', 'rotate(-90)')
+                .attr('y', 0 - margin.left + 20)
+                .attr('x', 0 - height / 2)
+                .attr('dy', '1em')
+                .style('text-anchor', 'middle')
+                .text('People Affected');
+
+           // Line generator for connecting points
+           const lineGenerator = d3.line()
+               .x(d => x(d.year))
+               .y(d => y(d[currentMetric]));
+
+           // Get unique years and set up the slider
+           const years = [...new Set(data.map(d => d.year))].sort((a, b) => a - b);
+           const slider = d3.select('#year-slider')
+               .attr('min', d3.min(years))
+               .attr('max', d3.max(years))
+               .attr('step', 1)
+               .on('input', () => update(+slider.property('value')));
+
+           // Play button functionality
+           d3.select('#play-button').on('click', () => {
+               playing = !playing;
+               if (playing) {
+                   d3.select('#play-button').text('Pause');
+                   interval = setInterval(() => {
+                       currentYear = currentYear !== null ? currentYear : d3.min(years);
+                       if (currentYear >= d3.max(years)) {
+                           clearInterval(interval);
+                           playing = false;
+                           d3.select('#play-button').text('Play');
+                       } else {
+                           currentYear++;
+                           slider.property('value', currentYear);
+                           update(currentYear);
+                       }
+                   }, 1000);
+               } else {
+                   clearInterval(interval);
+                   d3.select('#play-button').text('Play');
+               }
+           });
+
+           // Update function for animation
+           function update(year) {
+               currentYear = year;
+
+               // Get selected country from dropdown
+               const selectedCountry = countrySelect.property("value");
+
+               // Filter data for the selected year and country
+               const yearData = data.filter(d =>
+                   (selectedCountry === "All" || d.country === selectedCountry) && 
+                   d.year <= currentYear 
+               );
+
+               // Bind data to circles
+               const circles = svg.selectAll('circle').data(yearData, d => `${d.country}-${d.year}`);
+
+               // Exit circles
+               circles.exit().remove();
+
+               // Enter circles
+               circles.enter()
+                   .append('circle')
+                   .attr('cx', d => x(d.year))
+                   .attr('cy', d => y(d[currentMetric]))
+                   .attr('r', 5)
+                   .attr('fill', d => colorScale(d.country))
+                   .on('mouseover', (event, d) => {
+                       tooltip.transition().duration(200).style('opacity', 0.9);
+                       tooltip.html(`
+                           Country: ${d.country}<br>
+                           Year: ${d.year}<br>
+                           ${currentMetric}: ${d[currentMetric]}
+                       `)
+                       .style('left', (event.pageX + 10) + 'px')
+                       .style('top', (event.pageY - 10) + 'px');
+                   })
+                   .on('mouseout', () => {
+                       tooltip.transition().duration(200).style('opacity', 0);
+                   })
+                   // Merge enter and update
+                   .merge(circles)
+                   .transition().duration(500)
+                   .attr('cx', d => x(d.year))
+                   .attr('cy', d => y(d[currentMetric]));
+
+               // Draw line connecting points for the selected country
+               if (selectedCountry !== "All") {
+                   const lineData = data.filter(d =>
+                       d.country === selectedCountry && 
+                       d.year <= currentYear 
+                   );
+
+                   svg.selectAll('.line').remove(); // Remove existing lines
+
+                   svg.append("path")
+                       .datum(lineData)
+                       .attr("class", "line")
+                       .attr("fill", "none")
+                       .attr("stroke", colorScale(selectedCountry))
+                       .attr("stroke-width", 2)
+                       .attr("d", lineGenerator.y(d => y(d[currentMetric])));
+               }
+           }
+
+           // Initialize with the first year and set default selection to "All"
+           slider.property("value", d3.min(years));
+           countrySelect.property("value", "All");
+           update(d3.min(years));
+       }).catch(error => {
+           console.error("Error loading the CSV file:", error);
+       });
+   </script>
+</body>
+</html>

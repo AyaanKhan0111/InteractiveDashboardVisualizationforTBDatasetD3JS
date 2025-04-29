@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Geographic Representation Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      overflow: hidden;
+    }
+    #map {
+      width: 100%;
+      height: 100vh;
+    }
+    .filters {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 8px;
+      border-radius: 5px;
+      z-index: 1000;
+      width: 200px;
+    }
+    .filters label {
+      display: block;
+      margin-top: 5px;
+      font-size: 0.8em;
+    }
+    .filters select, 
+    .filters input {
+      width: 100%;
+      padding: 3px;
+      margin-top: 2px;
+      font-size: 0.8em;
+      box-sizing: border-box;
+    }
+    .toggle-switch {
+      display: flex;
+      align-items: left;
+      margin-bottom: 5px;
+      font-size: 0.8em;
+    }
+
+    .toggle-switch {
+  justify-content: flex-start;
+}
+    .toggle-switch input {
+      margin-left: 50px;
+    }
+
+
+    .legend {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 8px;
+      border-radius: 5px;
+      z-index: 1000;
+      font-size: 0.8em;
+    }
+    .legend div {
+      margin-bottom: 3px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<div class="filters">
+  <div class="toggle-switch">
+    <input type="checkbox" id="markerToggle">
+    <label for="markerToggle">Use Pins</label>
+  </div>
+
+  <label for="tbCauseFilter">TB Cause:</label>
+  <select id="tbCauseFilter">
+    <option value="">All Causes</option>
+  </select>
+
+  <label for="regionFilter">Region:</label>
+  <select id="regionFilter">
+    <option value="">All Regions</option>
+  </select>
+
+  <label for="deathFilter">Min Deaths:</label>
+  <input type="number" id="deathFilter" min="0" placeholder="Min death count" />
+
+  <label for="yearFilter">Year:</label>
+  <select id="yearFilter">
+    <option value="">All Years</option>
+  </select>
+</div>
+
+<div class="legend">
+  <h4>TB Cause Legend</h4>
+  <div id="legendContent"></div>
+</div>
+
+<div id="map"></div>
+
+<script>
+  // Initialize the map
+  const map = L.map('map').setView([20, 0], 2);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  // Define colors for TB Cause
+  const tbCauseColors = {
+    "Smoking": "#FF0000",
+    "Malnutrition": "#0000FF",
+    "Alcohol use disorder": "#00FF00",
+    "HIV co-infection": "#FFFF00",
+    "Diabetes": "#800080"
+  };
+
+  const markers = []; // Store markers to manage highlighting
+  let highlightedCause = null;
+
+  // Custom icon creation function for small pins
+  function createSmallPinIcon(color) {
+    return L.icon({
+      iconUrl: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="30" viewBox="0 0 20 30">
+        <path d="M10 0 C4.5 0 0 4.5 0 10 C0 15 10 30 10 30 C10 30 20 15 20 10 C20 4.5 15.5 0 10 0 Z" 
+              fill="${encodeURIComponent(color)}" 
+              stroke="white" 
+              stroke-width="1"/>
+        <circle cx="10" cy="10" r="4" fill="white" stroke="${encodeURIComponent(color)}" stroke-width="1"/>
+      </svg>`,
+      iconSize: [20, 30],
+      iconAnchor: [10, 30],
+      popupAnchor: [0, -30]
+    });
+  }
+
+  // Function to add markers to the map based on the data
+  function addMarkers(data) {
+    // Remove existing markers from the map
+    markers.forEach(markerObj => map.removeLayer(markerObj.pin));
+    markers.length = 0;
+
+    // Check if using pins or circles
+    const usePins = document.getElementById('markerToggle').checked;
+
+    // Add markers to the map
+    data.forEach(item => {
+      const markerColor = tbCauseColors[item['TB Cause']] || '#808080';
+      let pin;
+
+      if (usePins) {
+        // Use pin marker
+        const icon = createSmallPinIcon(markerColor);
+        pin = L.marker([item.latitude, item.longitude], { 
+          icon: icon,
+          opacity: item['TB Cause'] === highlightedCause ? 1 : 0.7
+        }).addTo(map);
+      } else {
+        // Use circle marker
+        pin = L.circleMarker([item.latitude, item.longitude], {
+          radius: 6,
+          fillColor: markerColor,
+          color: "white",
+          weight: 2,
+          opacity: item['TB Cause'] === highlightedCause ? 1 : 0.7,
+          fillOpacity: 0.7
+        }).addTo(map);
+      }
+
+      pin.bindPopup(`
+        <strong>Country:</strong> ${item.country}<br>
+        <strong>Year:</strong> ${item.year}<br>
+        <strong>TB Cause:</strong> ${item['TB Cause']}<br>
+        <strong>Deaths:</strong> ${item['Deaths']}<br>
+        <strong>People Affected:</strong> ${item['People Affected']}
+      `);
+
+      // Store marker reference
+      markers.push({ pin, cause: item['TB Cause'] });
+    });
+  }
+
+  // Load the CSV file using D3
+  d3.csv('updated_tb_dataset.csv').then(data => {
+    // Convert numeric fields to numbers
+    data.forEach(d => {
+      d['Deaths'] = +d['Deaths'];
+      d.latitude = +d.latitude;
+      d.longitude = +d.longitude;
+    });
+
+    // Extract unique causes, regions, and years
+    const tbCauses = Array.from(new Set(data.map(d => d['TB Cause'])));
+    const regions = Array.from(new Set(data.map(d => d.country)));
+    const years = Array.from(new Set(data.map(d => d.year)));
+
+    // Populate TB Cause filter
+    const tbCauseFilter = document.getElementById('tbCauseFilter');
+    tbCauses.forEach(cause => {
+      const option = document.createElement('option');
+      option.value = cause;
+      option.textContent = cause;
+      tbCauseFilter.appendChild(option);
+    });
+
+    // Populate region filter
+    const regionFilter = document.getElementById('regionFilter');
+    regions.forEach(region => {
+      const option = document.createElement('option');
+      option.value = region;
+      option.textContent = region;
+      regionFilter.appendChild(option);
+    });
+
+    // Populate year filter
+    const yearFilter = document.getElementById('yearFilter');
+    years.forEach(year => {
+      const option = document.createElement('option');
+      option.value = year;
+      option.textContent = year;
+      yearFilter.appendChild(option);
+    });
+
+    // Function to filter data based on selected filters
+    function filterData() {
+      const selectedCause = tbCauseFilter.value;
+      const selectedRegion = regionFilter.value;
+      const minDeaths = document.getElementById('deathFilter').value;
+      const selectedYear = yearFilter.value;
+
+      let filteredData = data;
+
+      // Filter by TB Cause
+      if (selectedCause) {
+        filteredData = filteredData.filter(d => d['TB Cause'] === selectedCause);
+      }
+
+      // Filter by region
+      if (selectedRegion) {
+        filteredData = filteredData.filter(d => d.country === selectedRegion);
+      }
+
+      // Filter by minimum death count
+      if (minDeaths) {
+        filteredData = filteredData.filter(d => +d['Deaths'] >= +minDeaths);
+      }
+
+      // Filter by year
+      if (selectedYear) {
+        filteredData = filteredData.filter(d => d.year === selectedYear);
+      }
+
+      addMarkers(filteredData);
+    }
+
+    // Function to create and display the legend
+    function createLegend() {
+      const legendContent = document.getElementById('legendContent');
+      legendContent.innerHTML = '';
+
+      // Create legend items
+      for (const [cause, color] of Object.entries(tbCauseColors)) {
+        const legendItem = document.createElement('div');
+        legendItem.innerHTML = `<span style="display:inline-block; width:15px; height:15px; background:${color}; margin-right:5px;"></span>${cause}`;
+        
+        legendItem.addEventListener('click', () => toggleHighlight(cause));
+        
+        legendContent.appendChild(legendItem);
+      }
+    }
+
+    function toggleHighlight(selectedCause) {
+      highlightedCause = highlightedCause === selectedCause ? null : selectedCause;
+      updateMarkerStyles();
+    }
+
+    function updateMarkerStyles() {
+      const usePins = document.getElementById('markerToggle').checked;
+
+      markers.forEach(markerObj => {
+        if (usePins) {
+          // For pins, adjust opacity
+          markerObj.pin.setOpacity(markerObj.cause === highlightedCause ? 1 : 0.7);
+        } else {
+          // For circle markers, adjust weight and opacity
+          const style = {
+            weight: markerObj.cause === highlightedCause ? 3 : 2,
+            opacity: markerObj.cause === highlightedCause ? 1 : 0.7
+          };
+          markerObj.pin.setStyle(style);
+        }
+      });
+    }
+
+    // Add toggle event listener
+    document.getElementById('markerToggle').addEventListener('change', () => {
+      addMarkers(data);
+    });
+
+    // Initial load of markers and legend
+    addMarkers(data);
+    createLegend();
+
+    // Add event listeners for filters
+    tbCauseFilter.addEventListener('change', filterData);
+    regionFilter.addEventListener('change', filterData);
+    document.getElementById('deathFilter').addEventListener('input', filterData);
+    yearFilter.addEventListener('change', filterData);
+  });
+</script>
+
+</body>
+</html>

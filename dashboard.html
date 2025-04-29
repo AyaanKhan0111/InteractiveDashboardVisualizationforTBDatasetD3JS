@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global Tuberculosis Insights</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@2.5.0/fonts/remixicon.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #1E40AF;
+            --secondary-color: #10B981;
+            --bg-gradient: linear-gradient(135deg, #E0F2FE 0%, #FFFFFF 100%);
+        }
+        body {
+            background: var(--bg-gradient);
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        .dashboard-card {
+            transition: all 0.3s ease;
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .dashboard-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
+        }
+        .iframe-container {
+            position: relative;
+            width: 100%;
+            height: 400px;
+            border-radius: 0.75rem;
+            overflow: hidden;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: none;
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            width: 90%;
+            max-width: 1200px;
+            height: 90vh;
+            background: white;
+            border-radius: 1rem;
+            overflow: hidden;
+            position: relative;
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <header class="text-center mb-12">
+            <h1 class="text-4xl font-extrabold text-gray-900 mb-4">
+                Global Tuberculosis Insights
+            </h1>
+            <p class="text-xl text-gray-600 max-w-2xl mx-auto">
+                Comprehensive visualization of tuberculosis trends, spread, and impact
+            </p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <!-- Timeline Visualization (Full Width) -->
+            <div class="dashboard-card p-6 lg:col-span-3 md:col-span-2">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-2xl font-bold text-gray-800">TB Global Timeline</h2>
+                    <span class="text-sm text-gray-500">Comprehensive Historical Trends</span>
+                </div>
+                <div class="iframe-container" id="timeline-container">
+                    <iframe src="tl.html" title="Timeline Visualization" class="w-full h-full"></iframe>
+                </div>
+                <div class="flex justify-between mt-4">
+                    <button onclick="openModal('timeline-container')" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                        <i class="ri-expand-line mr-2"></i>Expand
+                    </button>
+                    <button onclick="downloadVisualization('timeline-container')" class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition">
+                        <i class="ri-download-line mr-2"></i>Download
+                    </button>
+                </div>
+            </div>
+
+            <!-- Geographical Map -->
+            <div class="dashboard-card p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-bold text-gray-800">Regional Spread</h2>
+                    <span class="text-sm text-gray-500">Geographical Distribution</span>
+                </div>
+                <div class="iframe-container" id="map-container">
+                    <iframe src="map.html" title="Geographical Map" class="w-full h-full"></iframe>
+                </div>
+                <div class="flex justify-between mt-4">
+                    <button onclick="openModal('map-container')" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                        <i class="ri-expand-line mr-2"></i>Expand
+                    </button>
+                    <button onclick="downloadVisualization('map-container')" class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition">
+                        <i class="ri-download-line mr-2"></i>Download
+                    </button>
+                </div>
+            </div>
+
+            <!-- Network Graph -->
+            <div class="dashboard-card p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-bold text-gray-800">Infection Causes</h2>
+                    <span class="text-sm text-gray-500">By Country</span>
+                </div>
+                <div class="iframe-container" id="network-container">
+                    <iframe src="forced.html" title="Force Directed Graph" class="w-full h-full"></iframe>
+                </div>
+                <div class="flex justify-between mt-4">
+                    <button onclick="openModal('network-container')" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                        <i class="ri-expand-line mr-2"></i>Expand
+                    </button>
+                    <button onclick="downloadVisualization('network-container')" class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition">
+                        <i class="ri-download-line mr-2"></i>Download
+                    </button>
+                </div>
+            </div>
+
+            <!-- Sunburst Diagram -->
+            <div class="dashboard-card p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-bold text-gray-800">Treatment Distribution</h2>
+                    <span class="text-sm text-gray-500">Cause & Approach</span>
+                </div>
+                <div class="iframe-container" id="sunburst-container">
+                    <iframe src="sun.html" title="Sunburst Diagram" class="w-full h-full"></iframe>
+                </div>
+                <div class="flex justify-between mt-4">
+                    <button onclick="openModal('sunburst-container')" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                        <i class="ri-expand-line mr-2"></i>Expand
+                    </button>
+                    <button onclick="downloadVisualization('sunburst-container')" class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition">
+                        <i class="ri-download-line mr-2"></i>Download
+                    </button>
+                </div>
+            </div>
+
+            <!-- Treemap -->
+            <div class="dashboard-card p-6 md:col-span-2 lg:col-span-3">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-bold text-gray-800">Hierarchical Country Analysis</h2>
+                    <span class="text-sm text-gray-500">Comprehensive Data Exploration</span>
+                </div>
+                <div class="iframe-container" id="treemap-container">
+                    <iframe src="treemap.html" title="Treemap Visualization" class="w-full h-full"></iframe>
+                </div>
+                <div class="flex justify-between mt-4">
+                    <button onclick="openModal('treemap-container')" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                        <i class="ri-expand-line mr-2"></i>Expand
+                    </button>
+                    <button onclick="downloadVisualization('treemap-container')" class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition">
+                        <i class="ri-download-line mr-2"></i>Download
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Expanded Views -->
+    <div id="visualization-modal" class="modal-overlay">
+        <div class="modal-content">
+            <button onclick="closeModal()" class="absolute top-4 right-4 z-50 bg-red-500 text-white p-2 rounded-full">
+                <i class="ri-close-line text-2xl"></i>
+            </button>
+            <div id="modal-iframe-container" class="w-full h-full"></div>
+        </div>
+    </div>
+
+    <script>
+        function openModal(containerId) {
+            const modal = document.getElementById('visualization-modal');
+            const modalContainer = document.getElementById('modal-iframe-container');
+            const originalIframe = document.getElementById(`${containerId}`).querySelector('iframe');
+            
+            const newIframe = originalIframe.cloneNode(true);
+            newIframe.style.width = '100%';
+            newIframe.style.height = '100%';
+            
+            modalContainer.innerHTML = '';
+            modalContainer.appendChild(newIframe);
+            
+            modal.style.display = 'flex';
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('visualization-modal');
+            modal.style.display = 'none';
+        }
+
+        async function downloadVisualization(containerId) {
+            const container = document.getElementById(containerId);
+            const iframe = container.querySelector('iframe');
+
+            try {
+                const canvas = await html2canvas(iframe.contentDocument.body);
+                const link = document.createElement('a');
+                link.download = `${containerId}-visualization.png`;
+                link.href = canvas.toDataURL();
+                link.click();
+            } catch (error) {
+                console.error('Error capturing the visualization:', error);
+                alert('Failed to download the visualization. Please try again.');
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TB Relationship Force-Directed Graph</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+      body {
+          font-family: Arial, sans-serif;
+          display: flex;
+          margin: 0;
+          padding: 0;
+      }
+      #mainContainer {
+          display: flex;
+          width: 100%;
+      }
+      #graphContainer {
+          flex: 3;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+      }
+      #sidePanel {
+          flex: 1;
+          background-color: #f0f0f0;
+          padding: 20px;
+          overflow-y: auto;
+          max-height: 100vh;
+          border-left: 1px solid #ddd;
+          display: none; /* Initially hidden */
+      }
+      #controls {
+          margin-bottom: 20px;
+          display: flex;
+          gap: 15px;
+          align-items: center;
+          flex-wrap: wrap;
+      }
+      .tooltip {
+          position: absolute;
+          background-color: white;
+          border: 1px solid #ccc;
+          border-radius: 5px;
+          padding: 10px;
+          pointer-events: none;
+          max-width: 250px;
+          box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+      }
+      #graph {
+          border: 1px solid #ddd;
+          cursor: move;
+          flex-grow: 1;
+      }
+      .link {
+          stroke-opacity: 0.6;
+          cursor: pointer;
+      }
+      .zoom-controls {
+          margin-bottom: 10px;
+      }
+      .side-panel-detail {
+          margin-bottom: 15px;
+          padding: 10px;
+          background-color: white;
+          border-radius: 5px;
+          box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      }
+      .side-panel-detail h3 {
+          margin-top: 0;
+          color: #333;
+          border-bottom: 1px solid #eee;
+          padding-bottom: 5px;
+      }
+  </style>
+
+</head>
+<body>
+  <div id="mainContainer">
+    <div id="graphContainer">
+        <h3>Tuberculosis Global Relationship Network</h3>
+        
+        <div id="controls">
+            <div>
+                <label for="countrySelect">Select Countries:</label>
+                <select id="countrySelect" multiple style="width: 200px;">
+                    <option value="ALL">All Countries</option>
+                </select>
+            </div>
+            <div>
+                <label for="causeSelect">Select TB Cause:</label>
+                <select id="causeSelect" style="width: 200px;">
+                    <option value="">All Causes</option>
+                </select>
+            </div>
+            <div>
+                <label for="yearSelect">Select Year:</label>
+                <select id="yearSelect">
+                    <option value="all">All Years</option>
+                </select>
+            </div>
+            <div>
+                <label for="minPeopleAffected">Min People Affected:</label>
+                <input type="number" id="minPeopleAffected" min="0" value="0">
+            </div>
+            <button id="applyFilters">Apply Filters</button>
+        </div>
+        
+        <div id="graph"></div>
+    </div>
+    
+    <div id="sidePanel">
+      <button onclick="closeSidePanel()" style="float: right;">×</button>
+        <h2>Node Details</h2>
+        <div id="nodeSummary"></div>
+    </div>
+</div>
+
+    <script>
+        // Global variables to store full dataset
+        let fullDataset = [];
+        let currentNodes = [];
+        let currentLinks = [];
+        let selectedNode = null;
+        let svg, graphGroup, simulation, zoomBehavior;
+
+        // Load the dataset
+        d3.csv('updated_tb_dataset.csv').then(data => {
+            fullDataset = data;
+
+            // Populate country dropdown
+            const countrySelect = d3.select('#countrySelect');
+            const uniqueCountries = [...new Set(data.map(d => d.country))].sort();
+            countrySelect.selectAll('option')
+                .data(uniqueCountries)
+                .enter()
+                .append('option')
+                .attr('value', d => d)
+                .text(d => d);
+
+            // Populate TB Cause dropdown
+            const causeSelect = d3.select('#causeSelect');
+            const uniqueCauses = [...new Set(data.map(d => d['TB Cause']))].sort();
+            causeSelect.selectAll('option')
+                .data(uniqueCauses)
+                .enter()
+                .append('option')
+                .attr('value', d => d)
+                .text(d => d);
+
+            // Populate year dropdown
+            const yearSelect = d3.select('#yearSelect');
+            const uniqueYears = [...new Set(data.flatMap(d => d.year.split(',').map(y => y.trim())))].sort();
+            yearSelect.selectAll('option')
+                .data(uniqueYears)
+                .enter()
+                .append('option')
+                .attr('value', d => d)
+                .text(d => d);
+
+            // Initialize graph
+            initializeGraph(data);
+
+            // Set up filter event listener
+            d3.select('#applyFilters').on('click', applyFilters);
+        });
+
+        function initializeGraph(filteredData) {
+
+            
+
+
+            // Clear previous graph and side panel
+            d3.select('#graph').selectAll('*').remove();
+            d3.select('#nodeSummary').html('<p>Click on a node to see details</p>');
+
+            // Prepare the nodes with additional information
+            const nodeMap = new Map();
+            const edgeDetails = new Map();
+
+            // Group data by country and TB cause
+            const groupedData = d3.group(filteredData, d => d.country, d => d['TB Cause']);
+
+            // Process grouped data
+            groupedData.forEach((causeMap, country) => {
+                // Collect years for the country
+                const countryYears = new Set();
+                let totalPeopleAffected = 0;
+                let deathCount = 0;
+                let fullCountryData = [];
+
+                causeMap.forEach((causeEntries, cause) => {
+                    causeEntries.forEach(entry => {
+                        // Collect years
+                        if (entry['year']) {
+                            entry['year'].split(',').forEach(year => countryYears.add(year.trim()));
+                        }
+                        
+                        // Sum people affected
+                        const peopleAffectedByCause = parseInt(entry['People Affected'] || 0);
+                        
+                        // Store edge details
+                        const key = `${country}|${cause}`;
+                        if (!edgeDetails.has(key)) {
+                            edgeDetails.set(key, {
+                                country: country,
+                                cause: cause,
+                                peopleAffected: peopleAffectedByCause
+                            });
+                        } else {
+                            // Aggregate people affected for the same country-cause combination
+                            const existingEdge = edgeDetails.get(key);
+                            existingEdge.peopleAffected += peopleAffectedByCause;
+                        }
+
+                        totalPeopleAffected += peopleAffectedByCause;
+                        deathCount += parseInt(entry['Death Count'] || 0);
+                        
+                        // Collect full data for the country
+                        fullCountryData.push(entry);
+                    });
+                });
+
+                // Create country node
+                nodeMap.set(country, {
+                    id: country,
+                    type: 'country',
+                    peopleAffected: totalPeopleAffected,
+                    deathCount: deathCount,
+                    years: Array.from(countryYears).sort().join(', '),
+                    fullData: fullCountryData
+                });
+
+                // Create cause nodes
+                causeMap.forEach((causeEntries, cause) => {
+                    if (!nodeMap.has(cause)) {
+                        nodeMap.set(cause, {
+                            id: cause,
+                            type: 'cause',
+                            years: causeEntries[0]['year'] || 'N/A',
+                            fullData: causeEntries
+                        });
+                    }
+                });
+            });
+
+            const nodes = Array.from(nodeMap.values());
+
+            // Prepare links
+            const links = Array.from(edgeDetails.values()).map(edge => ({
+                source: edge.country,
+                target: edge.cause,
+                peopleAffected: edge.peopleAffected,
+                weight: 1
+            }));
+
+            // Set up SVG canvas
+            const width = 1000;
+            const height = 800;
+
+            svg = d3.select('#graph')
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height);
+
+            // Create a zoom-able group for the graph elements
+            graphGroup = svg.append('g');
+
+            // Create a tooltip
+            const tooltip = d3.select('body')
+                .append('div')
+                .attr('class', 'tooltip')
+                .style('opacity', 0);
+
+            // Custom color function
+            const nodeColor = (d) => {
+                if (d.type === 'country') return '#008ECC';
+                return '#37fd12';
+            };
+
+            // Create zoom behavior
+            zoomBehavior = d3.zoom()
+                .scaleExtent([0.1, 10])  // Limit zoom levels
+                .on('zoom', zoomed);
+
+            // Apply zoom behavior to the SVG
+            svg.call(zoomBehavior);
+
+            // Define simulation
+            simulation = d3.forceSimulation(nodes)
+                .force('link', d3.forceLink(links)
+                    .id(d => d.id)
+                    .distance(100))
+                .force('charge', d3.forceManyBody().strength(-200))
+                .force('center', d3.forceCenter(width / 2, height / 2));
+
+            // Draw links
+            const link = graphGroup.selectAll('.link')
+                .data(links)
+                .enter()
+                .append('line')
+                .attr('class', 'link')
+                .style('stroke', '#ABF7B1')
+                .style('stroke-width', 2)
+                .on('mouseover', (event, d) => {
+                    tooltip.transition().duration(200).style('opacity', 0.9);
+                    tooltip.html(`
+                        <strong>Country:</strong> ${d.source.id}<br>
+                        <strong>TB Cause:</strong> ${d.target.id}<br>
+                        <strong>People Affected:</strong> ${d.peopleAffected}
+                    `)
+                    .style('left', (event.pageX + 10) + 'px')
+                    .style('top', (event.pageY - 10) + 'px');
+                })
+                .on('mouseout', () => {
+                    tooltip.transition().duration(200).style('opacity', 0);
+                });
+
+            // Draw nodes
+            const node = graphGroup.selectAll('.node')
+                .data(nodes)
+                .enter()
+                .append('g')
+                .attr('class', 'node');
+
+            // Add circles to nodes
+            node.append('circle')
+                .attr('r', d => {
+                    if (d.type === 'country') return Math.sqrt(d.peopleAffected) / 50 + 5;
+                    return 10;
+                })
+                .style('fill', nodeColor);
+
+            // Add interactivity and tooltips for nodes
+            node.call(d3.drag()
+                .on('start', dragStart)
+                .on('drag', dragged)
+                .on('end', dragEnd))
+                .on('mouseover', (event, d) => {
+                    tooltip.transition().duration(200).style('opacity', 0.9);
+                    let tooltipHtml = `<strong>${d.id}</strong><br>`;
+                    if (d.type === 'country') {
+                        tooltipHtml += `People Affected: ${d.peopleAffected}<br>`;
+                        tooltipHtml += `Death Count: ${d.deathCount}<br>`;
+                        tooltipHtml += `Years: ${d.years}`;
+                    } else {
+                        tooltipHtml += `Years: ${d.years}`;
+                    }
+                    tooltip.html(tooltipHtml)
+                        .style('left', (event.pageX + 10) + 'px')
+                        .style('top', (event.pageY - 10) + 'px');
+                })
+                .on('mouseout', () => {
+                    tooltip.transition().duration(200).style('opacity', 0);
+                })
+                .on('click', (event, d) => {
+    // Remove previous selection
+    if (selectedNode) {
+        svg.selectAll('.node circle')
+            .style('stroke', 'none')
+            .style('stroke-width', 0);
+    }
+
+    // Mark current node as selected
+    const clickedNode = d3.select(event.currentTarget).select('circle');
+    clickedNode
+        .style('stroke', 'yellow')
+        .style('stroke-width', 4);
+
+    // Update selected node
+    selectedNode = d;
+
+    // Zoom to the selected node
+    const [x, y] = [d.x, d.y];
+    const zoomScale = 2; // Adjust zoom level as needed
+    svg.transition()
+        .duration(750)
+        .call(
+            zoomBehavior.transform, 
+            d3.zoomIdentity
+                .translate(width / 2, height / 2)
+                .scale(zoomScale)
+                .translate(-x, -y)
+        );
+    
+    // Show detailed information in side panel
+    displayNodeDetails(d);
+})
+
+            // Simulation tick handler
+            simulation.on('tick', () => {
+                link
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+
+                node
+                    .attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+
+            // Drag functions
+            function dragStart(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            }
+
+            function dragged(event, d) {
+                d.fx = event.x;
+                d.fy = event.y;
+            }
+
+            function dragEnd(event, d) {
+                if (!event.active) simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+            }
+
+            // Zooming functions
+            function zoomed(event) {
+                graphGroup.attr('transform', event.transform);
+            }
+
+            // Store current state for filtering
+            currentNodes = nodes;
+            currentLinks = links;
+        }
+// Function to display node details in side panel
+function displayNodeDetails(node) {
+    const sidePanel = document.getElementById('sidePanel');
+    sidePanel.style.display = 'block';
+  
+    const sidePanelContent = d3.select('#nodeSummary');
+    sidePanelContent.html(''); // Clear previous content
+
+     // Create a title section with prominent display of node name
+     const titleDiv = sidePanelContent.append('div')
+        .attr('class', 'side-panel-detail');
+    
+    titleDiv.append('h2')
+        .text(node.id)
+        .style('color', node.type === 'country' ? '#008ECC' : '#37fd12')
+        .style('border-bottom', '2px solid #eee')
+        .style('padding-bottom', '10px');
+
+    // Add node type as a subtitle
+    titleDiv.append('p')
+        .html(`<em>${node.type === 'country' ? 'Country' : 'TB Cause'}</em>`)
+        .style('color', '#666')
+        .style('margin-top', '5px');
+        
+    // Create a summary section
+    const summaryDiv = sidePanelContent.append('div')
+        .attr('class', 'side-panel-detail');
+    
+    summaryDiv.append('h3').text('Summary');
+    
+    if (node.type === 'country') {
+        summaryDiv.append('p')
+            .html(`
+                <strong>Total People Affected:</strong> ${node.peopleAffected.toLocaleString()}<br>
+                <strong>Total Death Count:</strong> ${node.deathCount.toLocaleString()}<br>
+                <strong>Years Active:</strong> ${node.years}
+            `);
+    } else {
+        summaryDiv.append('p')
+            .html(`
+                <strong>TB Cause:</strong> ${node.id}<br>
+                <strong>Years Recorded:</strong> ${node.years}
+            `);
+    }
+
+    // Create a detailed data section
+    const detailsDiv = sidePanelContent.append('div')
+        .attr('class', 'side-panel-detail');
+    
+    detailsDiv.append('h3').text('Detailed Information');
+
+    // Prepare and display detailed data
+    if (node.fullData && node.fullData.length > 0) {
+        // Create a table for detailed data
+        const table = detailsDiv.append('table')
+            .style('width', '100%')
+            .style('border-collapse', 'collapse');
+        
+        // Table headers
+        const headers = [
+            'Year', 'Cause Name', 'People Affected', 
+            'Death Count', 'Death Rate', 'Treatment Available'
+        ];
+        
+        table.append('thead')
+            .append('tr')
+            .selectAll('th')
+            .data(headers)
+            .enter()
+            .append('th')
+            .style('border', '1px solid #ddd')
+            .style('padding', '8px')
+            .style('background-color', '#f2f2f2')
+            .text(d => d);
+
+        // Table body
+        const tbody = table.append('tbody');
+        
+        const uniqueEntries = node.fullData.reduce((acc, entry) => {
+            const key = `${entry.year}-${entry['TB Cause']}`;
+            if (!acc.has(key)) {
+                acc.set(key, entry);
+            }
+            return acc;
+        }, new Map());
+
+        tbody.selectAll('tr')
+            .data(Array.from(uniqueEntries.values()))
+            .enter()
+            .append('tr')
+            .selectAll('td')
+            .data(entry => [
+                entry.year,
+                entry['TB Cause'],
+                entry['People Affected'] ? parseInt(entry['People Affected']).toLocaleString() : 'N/A',
+                entry['Death Count'] ? parseInt(entry['Death Count']).toLocaleString() : 'N/A',
+                entry['Due to TB Death Rate (%)'] ? `${entry['Due to TB Death Rate (%)']}%` : 'N/A',
+                entry['Treatment Available'] || 'N/A'
+            ])
+            .enter()
+            .append('td')
+            .style('border', '1px solid #ddd')
+            .style('padding', '8px')
+            .text(d => d);
+    } else {
+        detailsDiv.append('p').text('No detailed information available.');
+    }
+
+    // If it's a country node, add connection details
+    if (node.type === 'country') {
+        const connectionsDiv = sidePanelContent.append('div')
+            .attr('class', 'side-panel-detail');
+        
+        connectionsDiv.append('h3').text('TB Cause Connections');
+
+        // Find connected TB causes
+        const connectedCauses = currentLinks
+            .filter(link => link.source.id === node.id)
+            .map(link => ({
+                cause: link.target.id,
+                peopleAffected: link.peopleAffected
+            }));
+
+        if (connectedCauses.length > 0) {
+            const causeTable = connectionsDiv.append('table')
+                .style('width', '100%')
+                .style('border-collapse', 'collapse');
+            
+            causeTable.append('thead')
+                .append('tr')
+                .selectAll('th')
+                .data(['TB Cause', 'People Affected'])
+                .enter()
+                .append('th')
+                .style('border', '1px solid #ddd')
+                .style('padding', '8px')
+                .style('background-color', '#f2f2f2')
+                .text(d => d);
+
+            const tbody = causeTable.append('tbody');
+            
+            tbody.selectAll('tr')
+                .data(connectedCauses)
+                .enter()
+                .append('tr')
+                .selectAll('td')
+                .data(d => [
+                    d.cause,
+                    d.peopleAffected.toLocaleString()
+                ])
+                .enter()
+                .append('td')
+                .style('border', '1px solid #ddd')
+                .style('padding', '8px')
+                .text(d => d);
+        } else {
+            connectionsDiv.append('p').text('No TB cause connections found.');
+        }
+    }
+}
+
+function closeSidePanel() {
+    const sidePanel = document.getElementById('sidePanel');
+    sidePanel.style.display = 'none';
+
+    // Remove selection highlight
+    if (selectedNode) {
+        svg.selectAll('.node circle')
+            .style('stroke', 'none')
+            .style('stroke-width', 0);
+        selectedNode = null;
+    }
+}
+
+
+function applyFilters() {
+            // Get filter values
+            const selectedCountries = Array.from(
+                document.getElementById('countrySelect').selectedOptions, 
+                option => option.value
+            );
+            const selectedCause = document.getElementById('causeSelect').value;
+            const minPeopleAffected = parseInt(document.getElementById('minPeopleAffected').value);
+            const selectedYear = document.getElementById('yearSelect').value;
+
+            // Apply filters
+            let filteredData = fullDataset;
+
+            // Country filter
+            if (!selectedCountries.includes('ALL') && selectedCountries.length > 0) {
+                filteredData = filteredData.filter(d => 
+                    selectedCountries.includes(d.country)
+                );
+            }
+
+            // TB Causes filter
+            if (selectedCause) {
+                filteredData = filteredData.filter(d => 
+                    d['TB Cause'] === selectedCause
+                );
+            }
+
+            // People Affected filter
+            if (minPeopleAffected > 0) {
+                if (selectedYear === 'all') {
+                    // For all years, calculate total people affected across all years
+                    const peopleAffectedByCountry = d3.rollup(
+                        filteredData, 
+                        v => d3.sum(v, d => parseInt(d['People Affected'] || 0)),
+                        d => d.country
+                    );
+
+                    filteredData = filteredData.filter(d => {
+                        const totalPeopleAffected = peopleAffectedByCountry.get(d.country) || 0;
+                        return totalPeopleAffected >= minPeopleAffected;
+                    });
+                } else {
+                    // For a specific year, filter by people affected in that year
+                    filteredData = filteredData.filter(d => {
+                        // Check if the selected year is in the year list
+                        const years = d.year.split(',').map(y => y.trim());
+                        return years.includes(selectedYear) && 
+                               parseInt(d['People Affected'] || 0) >= minPeopleAffected;
+                    });
+                }
+            }
+            // Year filter
+            if (selectedYear && selectedYear !== 'all') {
+                filteredData = filteredData.filter(d => 
+                    d.year.split(',').map(y => y.trim()).includes(selectedYear)
+                );
+            }
+
+            // Reinitialize graph with filtered data
+            initializeGraph(filteredData);
+        }
+    </script>
+</body>
+</html>
